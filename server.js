@@ -88,8 +88,8 @@ app.post('/crear-sesion-pago', async (req, res) => {
       // 3. A dónde enviamos al cliente después del pago
       // IMPORTANTE: Si estás usando "Live Server" en VS Code, 
       // tu puerto suele ser 5500 o 5501. Ajusta si es necesario.
-      success_url: 'http://localhost:5500/pago-exitoso.html',
-      cancel_url: 'http://localhost:5500/tienda.html',
+      success_url: 'https://multiserviciosvrn.jrplanet.space/pago-exitoso.html', 
+cancel_url: 'https://multiserviciosvrn.jrplanet.space/tienda.html',
     });
 
     // 4. Respondemos al frontend con la URL de pago
