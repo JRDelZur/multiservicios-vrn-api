@@ -1,39 +1,50 @@
-// 1. Cargar las variables de entorno (tus claves) del archivo .env
+// 1. Cargar las variables de entorno
 require('dotenv').config();
 
-// 2. Importar las herramientas que instalamos
+// 2. Importar herramientas
 const express = require('express');
 const nodemailer = require('nodemailer');
 const cors = require('cors');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-// 3. Inicializar Express (nuestro servidor)
+
+// 3. Inicializar Express
 const app = express();
 
-app.post('/webhook', express.raw({type: 'application/json'}), async (req, res) => {
+// --- CORRECCIÓN: DEFINIMOS EL TRANSPORTER AQUÍ ARRIBA ---
+// Así está listo antes de que lo usemos en cualquier ruta
+const transporter = nodemailer.createTransport({
+  host: process.env.EMAIL_HOST,
+  port: process.env.EMAIL_PORT,
+  secure: true,
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
+
+// --- RUTA 1: WEBHOOK DE STRIPE (Debe ir ANTES de express.json) ---
+app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
   const sig = req.headers['stripe-signature'];
   let event;
 
   try {
-    // Verificamos que el evento venga realmente de Stripe
     event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
   } catch (err) {
-    console.error(`Webhook Error: ${err.message}`);
+    console.error(`❌ Webhook Error: ${err.message}`);
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
   // Si el pago fue exitoso
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
-    
-    // Obtenemos los datos
+
     const clienteEmail = session.customer_details.email;
-    const monto = session.amount_total / 100; // Stripe lo da en centavos
-    
+    const monto = session.amount_total / 100;
+
     console.log(`💰 Pago recibido de: ${clienteEmail} por $${monto}`);
 
-    // CONFIGURA AQUÍ EL CORREO
     const mailOptions = {
-      from: `Tienda VRN <onboarding@resend.dev>`, // Cambia esto cuando verifiques tu dominio en Resend
+      from: `Tienda VRN <onboarding@resend.dev>`,
       to: clienteEmail,
       subject: '¡Tu descarga está lista! - Multiservicios VRN',
       html: `
@@ -52,7 +63,7 @@ app.post('/webhook', express.raw({type: 'application/json'}), async (req, res) =
       `,
     };
 
-    // Enviamos el correo
+    // Usamos el transporter que definimos arriba
     transporter.sendMail(mailOptions, (error, info) => {
       if (error) {
         console.error('❌ Error enviando correo:', error);
@@ -62,94 +73,61 @@ app.post('/webhook', express.raw({type: 'application/json'}), async (req, res) =
     });
   }
 
-  // Respondemos a Stripe para que sepa que recibimos el mensaje
-  res.json({received: true});
+  res.json({ received: true });
 });
 
-// 4. Configurar Middlewares (Herramientas de conexión)
-app.use(express.json()); // Permite al servidor entender datos en formato JSON
-app.use(cors()); // Permite que tu frontend hable con este backend
+// --- MIDDLEWARES GLOBALES (Para el resto de las rutas) ---
+app.use(express.json());
+app.use(cors());
 
-// 5. Configurar el "Transportador" de email
-// Node.js usará esto para conectarse a tu servicio de email.
-const transporter = nodemailer.createTransport({
-  host: process.env.EMAIL_HOST, // El host de tu proveedor (ej. smtp.resend.com)
-  port: process.env.EMAIL_PORT, // El puerto (ej. 465)
-  secure: true, // Usar SSL/TLS
-  auth: {
-    user: process.env.EMAIL_USER, // Tu usuario (ej. 'resend')
-    pass: process.env.EMAIL_PASS, // Tu contraseña (la API Key)
-  },
-});
-
-// 6. Crear la "Ruta" del Formulario
-// Esta es la URL que tu formulario llamará.
-// app.post() significa que estamos esperando recibir datos.
+// --- RUTA 2: FORMULARIO DE CONTACTO ---
 app.post('/enviar-formulario', (req, res) => {
-  console.log('Datos recibidos:', req.body); // Muestra los datos en la terminal
-
-  // Sacamos los datos del formulario que nos envió el frontend
+  console.log('Datos recibidos:', req.body);
   const { nombre, email, mensaje } = req.body;
 
-  // 7. Definir las opciones del correo
   const mailOptions = {
-    from: `Formulario Web <onboarding@resend.dev>`, // Puedes poner lo que sea, pero Resend/Sendgrid puede que te pida verificar un dominio.
-    to: process.env.EMAIL_TO, // El correo que configuraste en .env
+    from: `Formulario Web <onboarding@resend.dev>`,
+    to: process.env.EMAIL_TO,
     subject: `Nuevo mensaje de contacto de: ${nombre}`,
     html: `
-      <h2>Nuevo Mensaje del Formulario de Contacto</h2>
+      <h2>Nuevo Mensaje</h2>
       <p><strong>Nombre:</strong> ${nombre}</p>
       <p><strong>Email:</strong> ${email}</p>
-      <hr>
-      <p><strong>Mensaje:</strong></p>
-      <p>${mensaje}</p>
+      <p><strong>Mensaje:</strong> ${mensaje}</p>
     `,
   };
 
-  // 8. Enviar el correo
   transporter.sendMail(mailOptions, (error, info) => {
     if (error) {
-      console.error('Error al enviar email:', error);
-      // Enviar una respuesta de error al frontend
-      res.status(500).json({ message: 'Error al enviar el mensaje.' });
+      console.error('Error email:', error);
+      res.status(500).json({ message: 'Error al enviar.' });
     } else {
       console.log('Email enviado:', info.response);
-      // Enviar una respuesta de éxito al frontend
-      res.status(200).json({ message: '¡Mensaje enviado con éxito!' });
+      res.status(200).json({ message: 'Enviado con éxito.' });
     }
   });
 });
-// ---
-// RUTA PARA CREAR EL PAGO (El puente con Stripe)
-// ---
+
+// --- RUTA 3: CREAR PAGO (CHECKOUT) ---
 app.post('/crear-sesion-pago', async (req, res) => {
   try {
-    // 1. Recibimos los datos del botón del frontend
     const { nombre, precio } = req.body;
 
-    // 2. Le pedimos a Stripe que cree la sesión
     const session = await stripe.checkout.sessions.create({
-      payment_method_types: ['card', 'oxxo'], // Aceptamos Tarjeta y OXXO
+      payment_method_types: ['card', 'oxxo'],
       line_items: [{
         price_data: {
-          currency: 'mxn', // Pesos Mexicanos
-          product_data: {
-            name: nombre, // Ej: "Plantilla Contrato"
-          },
-          unit_amount: parseInt(precio), // Ej: 19900 (que son $199.00)
+          currency: 'mxn',
+          product_data: { name: nombre },
+          unit_amount: parseInt(precio),
         },
         quantity: 1,
       }],
       mode: 'payment',
-
-      // 3. A dónde enviamos al cliente después del pago
-      // IMPORTANTE: Si estás usando "Live Server" en VS Code, 
-      // tu puerto suele ser 5500 o 5501. Ajusta si es necesario.
-      success_url: 'https://multiserviciosvrn.jrplanet.space/pago-exitoso.html', 
-cancel_url: 'https://multiserviciosvrn.jrplanet.space/tienda.html',
+      success_url: 'https://multiserviciosvrn.jrplanet.space/pago-exitoso.html',
+      cancel_url: 'https://multiserviciosvrn.jrplanet.space/tienda.html',
     });
 
-    // 4. Respondemos al frontend con la URL de pago
     res.json({ url: session.url });
 
   } catch (error) {
@@ -157,8 +135,9 @@ cancel_url: 'https://multiserviciosvrn.jrplanet.space/tienda.html',
     res.status(500).json({ error: 'No se pudo iniciar el pago' });
   }
 });
-// 9. Iniciar el servidor
-const PORT = 3000; // El puerto donde correrá el backend
+
+// --- INICIAR SERVIDOR ---
+const PORT = 3000;
 app.listen(PORT, () => {
-  console.log(`Servidor backend corriendo en http://localhost:${PORT}`);
+  console.log(`Servidor backend corriendo en puerto ${PORT}`);
 });
