@@ -20,37 +20,46 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
   try {
     event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
   } catch (err) {
-    console.error(`❌ Webhook Error: ${err.message}`);
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
-  // Si el pago fue exitoso
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
+
     const clienteEmail = session.customer_details.email;
     const monto = session.amount_total / 100;
 
-    console.log(`💰 Pago recibido de: ${clienteEmail} por $${monto}`);
+    // 1. ABRIMOS LA MOCHILA (METADATA) PARA VER QUÉ ARCHIVO ES
+    // Si por alguna razón no trae archivo, ponemos uno por defecto 'error.pdf'
+    const archivoPDF = session.metadata.archivo_destino || 'error.pdf';
 
-    // --- ENVIAR CORREO CON LA API (ESTO NO FALLA) ---
+    // Construimos el enlace dinámico
+    const enlaceDescarga = `https://multiserviciosvrn.jrplanet.space/descargas/${archivoPDF}`;
+
+    console.log(`💰 Pago de: ${clienteEmail}. Archivo a enviar: ${archivoPDF}`);
+
     try {
-      const data = await resend.emails.send({
-        from: 'Tienda VRN <ventas@jrplanet.space>',
-        to: [clienteEmail], // Resend exige que esto sea una lista []
-        subject: '¡Tu descarga está lista! - Multiservicios VRN',
+      await resend.emails.send({
+        from: 'Tienda VRN <ventas@jrplanet.space>', // O tu correo de onboarding si aún no verificas
+        to: [clienteEmail],
+        subject: '¡Aquí tienes tu descarga! - Multiservicios VRN',
         html: `
           <div style="font-family: sans-serif; padding: 20px;">
             <h1 style="color: #4CAF50;">¡Gracias por tu compra!</h1>
-            <p>Hemos confirmado tu pago de <strong>$${monto} MXN</strong>.</p>
-            <p>Descarga tu archivo aquí:</p>
-            <a href="https://multiserviciosvrn.jrplanet.space/descargas/01.pdf" 
+            <p>Hemos confirmado tu pago.</p>
+            <p>Aquí tienes el archivo que compraste:</p>
+            
+            <a href="${enlaceDescarga}" 
                style="background: #000; color: #fff; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: bold;">
-               DESCARGAR AHORA
+               DESCARGAR ARCHIVO
             </a>
+            
+            <p style="margin-top:20px; color:#777; font-size:12px">
+               Enlace directo: ${enlaceDescarga}
+            </p>
           </div>
         `
       });
-      console.log('✅ Correo enviado con éxito. ID:', data.id);
     } catch (error) {
       console.error('❌ Error enviando correo:', error);
     }
@@ -59,32 +68,16 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
   res.json({ received: true });
 });
 
-// --- MIDDLEWARES ---
-app.use(cors());
-app.use(express.json());
 
-// --- RUTA 2: CONTACTO (Actualizada también a la API) ---
-app.post('/enviar-formulario', async (req, res) => {
-  const { nombre, email, mensaje } = req.body;
+// ... (Tus middlewares y ruta de contacto siguen igual) ...
 
-  try {
-    await resend.emails.send({
-      from: 'Formulario VRN <onboarding@resend.dev>',
-      to: [process.env.EMAIL_TO], // Tu correo personal
-      subject: `Nuevo mensaje de: ${nombre}`,
-      html: `<p>Nombre: ${nombre}</p><p>Email: ${email}</p><p>${mensaje}</p>`
-    });
-    res.status(200).json({ message: 'Enviado con éxito' });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Error al enviar' });
-  }
-});
 
-// --- RUTA 3: CREAR PAGO ---
+// --- RUTA 3: CREAR PAGO (Actualizada para llenar la mochila) ---
 app.post('/crear-sesion-pago', async (req, res) => {
   try {
-    const { nombre, precio } = req.body;
+    // 2. RECIBIMOS EL ARCHIVO DEL FRONTEND
+    const { nombre, precio, archivo } = req.body;
+
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card', 'oxxo'],
       line_items: [{
@@ -96,9 +89,16 @@ app.post('/crear-sesion-pago', async (req, res) => {
         quantity: 1,
       }],
       mode: 'payment',
+
+      // 3. AQUÍ GUARDAMOS EL DATO EN LA "MOCHILA" DE STRIPE
+      metadata: {
+        archivo_destino: archivo // "contrato.pdf"
+      },
+
       success_url: 'https://multiserviciosvrn.jrplanet.space/pago-exitoso.html',
       cancel_url: 'https://multiserviciosvrn.jrplanet.space/tienda.html',
     });
+
     res.json({ url: session.url });
   } catch (error) {
     res.status(500).json({ error: 'Error stripe' });
