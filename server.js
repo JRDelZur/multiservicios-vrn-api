@@ -32,7 +32,7 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
 
     // Leemos el archivo de la mochila (metadata)
     const archivoPDF = session.metadata.archivo_destino || 'error.pdf';
-    const enlaceDescarga = `https://multiserviciosvrn.jrplanet.space/descargas/${archivoPDF}`;
+    const enlaceDescarga = `https://multiserviciosvrn.jrplanet.space/assets/downloads/${archivoPDF}`;
 
     console.log(`💰 Pago recibido de: ${clienteEmail}. Archivo: ${archivoPDF}`);
 
