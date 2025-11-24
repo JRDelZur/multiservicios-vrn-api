@@ -14,12 +14,14 @@ const app = express();
 // Así está listo antes de que lo usemos en cualquier ruta
 const transporter = nodemailer.createTransport({
   host: process.env.EMAIL_HOST,
-  port: process.env.EMAIL_PORT,
-  secure: true,
+  port: 587, //process.env.EMAIL_PORT,
+  secure: false,
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
   },
+  logger: true,
+  debug: true,
 });
 
 // --- RUTA 1: WEBHOOK DE STRIPE (Debe ir ANTES de express.json) ---
