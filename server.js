@@ -9,6 +9,63 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 // 3. Inicializar Express (nuestro servidor)
 const app = express();
 
+app.post('/webhook', express.raw({type: 'application/json'}), async (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  let event;
+
+  try {
+    // Verificamos que el evento venga realmente de Stripe
+    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
+  } catch (err) {
+    console.error(`Webhook Error: ${err.message}`);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  // Si el pago fue exitoso
+  if (event.type === 'checkout.session.completed') {
+    const session = event.data.object;
+    
+    // Obtenemos los datos
+    const clienteEmail = session.customer_details.email;
+    const monto = session.amount_total / 100; // Stripe lo da en centavos
+    
+    console.log(`💰 Pago recibido de: ${clienteEmail} por $${monto}`);
+
+    // CONFIGURA AQUÍ EL CORREO
+    const mailOptions = {
+      from: `Tienda VRN <onboarding@resend.dev>`, // Cambia esto cuando verifiques tu dominio en Resend
+      to: clienteEmail,
+      subject: '¡Tu descarga está lista! - Multiservicios VRN',
+      html: `
+        <div style="font-family: Arial, sans-serif; padding: 20px;">
+            <h1 style="color: #4CAF50;">¡Gracias por tu compra!</h1>
+            <p>Hemos confirmado tu pago de <strong>$${monto} MXN</strong>.</p>
+            <p>Aquí tienes el recurso digital que adquiriste:</p>
+            
+            <a href="https://multiserviciosvrn.jrplanet.space/descargas/01.pdf" 
+               style="background-color: #000; color: #fff; padding: 15px 25px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block; margin-top: 10px;">
+               DESCARGAR ARCHIVO AHORA
+            </a>
+
+            <p style="margin-top: 30px; font-size: 12px; color: #666;">Si tienes problemas con la descarga, responde a este correo.</p>
+        </div>
+      `,
+    };
+
+    // Enviamos el correo
+    transporter.sendMail(mailOptions, (error, info) => {
+      if (error) {
+        console.error('❌ Error enviando correo:', error);
+      } else {
+        console.log('✅ Correo de producto enviado:', info.response);
+      }
+    });
+  }
+
+  // Respondemos a Stripe para que sepa que recibimos el mensaje
+  res.json({received: true});
+});
+
 // 4. Configurar Middlewares (Herramientas de conexión)
 app.use(express.json()); // Permite al servidor entender datos en formato JSON
 app.use(cors()); // Permite que tu frontend hable con este backend
