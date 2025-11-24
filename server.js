@@ -35,7 +35,7 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
     // --- ENVIAR CORREO CON LA API (ESTO NO FALLA) ---
     try {
       const data = await resend.emails.send({
-        from: 'Tienda VRN <onboarding@resend.dev>',
+        from: 'Tienda VRN <ventas@jrplanet.space>',
         to: [clienteEmail], // Resend exige que esto sea una lista []
         subject: '¡Tu descarga está lista! - Multiservicios VRN',
         html: `
