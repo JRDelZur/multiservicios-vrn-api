@@ -65,34 +65,78 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
 app.use(express.json());
 
 // --- RUTA 2: CREAR PAGO ---
+// index.js (o server.js - REEMPLAZAR FUNCIÓN EXISTENTE)
+
 app.post('/crear-sesion-pago', async (req, res) => {
   try {
-    const { nombre, precio, archivo } = req.body;
+    // Extraemos 'items' (para carrito) y 'nombre', 'precio', 'archivo' (para compra directa)
+    const { items, nombre, precio, archivo } = req.body;
+    let lineItems = [];
+    let metadata = {};
 
-    const session = await stripe.checkout.sessions.create({
-      payment_method_types: ['card', 'oxxo'],
-      line_items: [{
+    // --- Lógica Principal: Adaptar la entrada para Stripe ---
+    
+    // CASO A: Venta desde el Carrito (Múltiples productos)
+    if (items && Array.isArray(items) && items.length > 0) {
+      console.log("Procesando carrito de compras...");
+      
+      lineItems = items.map(item => ({
         price_data: {
           currency: 'mxn',
-          product_data: { name: nombre },
-          unit_amount: parseInt(precio),
+          product_data: {
+            name: item.nombre,
+          },
+          unit_amount: item.precio, // El precio ya viene en centavos
         },
         quantity: 1,
-      }],
+      }));
+
+      // Guardamos la lista de archivos para el Webhook (entrega de productos)
+      metadata = {
+        tipo: 'carrito',
+        archivos: JSON.stringify(items.map(i => i.archivo)) 
+      };
+
+    } 
+    // CASO B: Venta Directa (Un solo producto - Lógica anterior)
+    else if (nombre && precio) {
+      console.log("Procesando compra directa...");
+      
+      lineItems = [{
+        price_data: {
+          currency: 'mxn',
+          product_data: {
+            name: nombre,
+          },
+          unit_amount: precio,
+        },
+        quantity: 1,
+      }];
+
+      metadata = {
+        tipo: 'directo',
+        archivo_pdf: archivo
+      };
+    } else {
+      // Error si no se proporciona ni carrito ni producto individual
+      return res.status(400).json({ error: "Datos de producto no válidos o vacíos" });
+    }
+
+    // --- Creación de la Sesión de Stripe ---
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
+      line_items: lineItems,
       mode: 'payment',
-      // Guardamos el nombre del archivo para saber cuál enviar luego
-      metadata: {
-        archivo_destino: archivo
-      },
-      success_url: 'https://multiserviciosvrn.jrplanet.space/pago-exitoso.html',
-      cancel_url: 'https://multiserviciosvrn.jrplanet.space/tienda.html',
+      success_url: `https://multiserviciosvrn.jrplanet.space/exito?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `https://multiserviciosvrn.jrplanet.space/cancelado`,
+      metadata: metadata, 
     });
 
     res.json({ url: session.url });
 
   } catch (error) {
-    console.error('Error en Stripe:', error);
-    res.status(500).json({ error: 'Error al crear la sesión de pago' });
+    console.error("Error en Stripe:", error);
+    res.status(500).json({ error: error.message });
   }
 });
 
