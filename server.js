@@ -184,20 +184,22 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
 // 5. RUTA DE PROCESAMIENTO DE CORREO ENTRANTE (INBOUND WEBHOOK)
 // Recibe el JSON del correo de Resend y lo reenvía a tu email personal.
 // ===============================================
+// server.js (Ruta corregida para evitar el error 'undefined')
+
 app.post('/resend-inbound', express.json(), async (req, res) => {
   try {
     const inboundEmailData = req.body;
     
-    // Extraer datos clave del JSON enviado por Resend
-    const sender = inboundEmailData.from; // El correo original del cliente
-    const subject = inboundEmailData.subject; // Asunto original
-    const toAddress = inboundEmailData.to; // La dirección de soporte a la que llegó (ej. contacto@)
-    const bodyText = inboundEmailData.text; // Cuerpo del correo en texto plano
-    const bodyHtml = inboundEmailData.html; // Cuerpo del correo en HTML (mejor para el reenvío)
+    // Extraer datos clave
+    const sender = inboundEmailData.from;
+    const subject = inboundEmailData.subject || '(Sin Asunto)';
+    const toAddress = inboundEmailData.to;
     
-    // --- LÓGICA DE REENVÍO ---
+    // 🛡️ PROTECCIÓN: Usamos '||' para asegurar que nunca sean undefined
+    const bodyText = inboundEmailData.text || ''; 
+    const bodyHtml = inboundEmailData.html || '';
     
-    // ⚠️ CRÍTICO: Reemplaza esta dirección con tu correo personal
+    // Correos de destino
     const personalEmailsToForward = [
       'ronnidelgado1102@outlook.com',
       'vncitlali@gmail.com'
@@ -205,37 +207,81 @@ app.post('/resend-inbound', express.json(), async (req, res) => {
     
     const forwardSubject = `📧 REENVÍO: ${subject} (De: ${sender})`;
     
-    // Puedes usar el cuerpo HTML para mantener el formato, o el texto plano si es más simple
+    // 🛡️ LÓGICA SEGURA DE CONTENIDO
+    // Si hay HTML, úsalo. Si no, usa el texto convirtiendo saltos de línea.
+    // Si no hay ninguno, pon un mensaje por defecto.
+    let contentToRender = bodyHtml;
+    if (!contentToRender && bodyText) {
+        contentToRender = bodyText.replace(/\n/g, '<br>');
+    } else if (!contentToRender) {
+        contentToRender = '<p><i>(El correo recibido no tiene contenido de texto visible)</i></p>';
+    }
+    
     const forwardHtmlContent = `
-        <h1>Correo Reenviado desde ${toAddress}</h1>
+        <h2>Correo Reenviado desde ${toAddress}</h2>
         <p><strong>De:</strong> ${sender}</p>
         <p><strong>Asunto:</strong> ${subject}</p>
-        <hr>
-        ${bodyHtml || bodyText.replace(/\n/g, '<br>')}
+        <hr style="border: 1px solid #ccc; margin: 20px 0;">
+        <div>
+            ${contentToRender}
+        </div>
     `;
     
     await resend.emails.send({
-        // El 'from' debe ser un dominio verificado en Resend (ej. una subcuenta como webhook@)
-        from: 'soporte@jrplanet.space', 
+        from: 'soportevrn@jrplanet.space', 
         to: personalEmailsToForward,
         subject: forwardSubject,
         html: forwardHtmlContent,
     });
     
-    console.log(`✉️ Correo entrante de ${sender} reenviado a ${personalEmailToForward}`);
+    console.log(`✉️ Correo entrante de ${sender} reenviado con éxito.`);
     
     res.status(200).send('Correo procesado y reenviado con éxito');
     
   } catch (error) {
     console.error('🚨 Error al procesar correo entrante de Resend:', error.message);
-    
-    // Es vital devolver un 200/202 incluso si falla el reenvío para evitar que Resend reintente
-    // continuamente el mismo correo, lo que podría generar un bucle infinito.
-    res.status(202).send('Error de procesamiento, pero recibido.'); 
+    // Respondemos OK para que Resend no siga intentando enviar el mismo correo roto
+    res.status(200).send('Error controlado en el procesamiento.'); 
   }
 });
 
-// 5. Iniciar Servidor
+// ===============================================
+// 6. RUTA PARA EL FORMULARIO DE CONTACTO WEB
+// Recibe datos desde el frontend y envía un correo al admin
+// ===============================================
+app.post('/enviar-contacto', async (req, res) => {
+  try {
+    const { nombre, email, mensaje } = req.body;
+
+    // Validar datos básicos
+    if (!nombre || !email || !mensaje) {
+      return res.status(400).json({ error: "Faltan datos obligatorios" });
+    }
+
+    // Enviar correo al ADMIN (Tú)
+    await resend.emails.send({
+      from: 'Contacto Multiservicios VRN <contactovrn@jrplanet.space>', // Tu dominio verificado
+      // Reemplaza con tus correos personales donde quieres recibir las consultas
+      to: ['ronnidelgado1102@outlook.com', 'vncitlali@gmail.com'], 
+      subject: `Nueva Consulta Web de: ${nombre}`,
+      html: `
+        <h1>Nuevo Mensaje desde el Sitio Web</h1>
+        <p><strong>Nombre:</strong> ${nombre}</p>
+        <p><strong>Email:</strong> ${email}</p>
+        <hr />
+        <h3>Mensaje:</h3>
+        <p>${mensaje}</p>
+      `
+    });
+
+    res.status(200).json({ success: true, message: "Mensaje enviado correctamente" });
+
+  } catch (error) {
+    console.error("Error al enviar contacto:", error);
+    res.status(500).json({ error: "Error interno al enviar el correo" });
+  }
+});
+
 app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
+  console.log(`Servidor funcionando correctamente en el puerto ${port}`);
 });
